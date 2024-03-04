@@ -25,8 +25,8 @@ bool battery_initial = true;
 bool battery1_on = false;
 bool battery2_on = false;
 
-float battery1_voltage = 0;
-float battery2_voltage = 0;
+float battery1_voltage = 0.0f;
+float battery2_voltage = 0.0f;
 
 void control_init()
 {
@@ -114,7 +114,7 @@ void init_gpio()
   set_gpio_out(LED2_EN, 0,0);
 }
 
-float get_battery_voltage(int which_battery)
+float get_battery_voltage(int which_battery, bool busy_wait)
 {
   #define ADC_CONVERSION_FACTOR (3.3f / (1 << 12))
   #define ADC_SEL (26)
@@ -138,7 +138,10 @@ float get_battery_voltage(int which_battery)
   {
     uint16_t reading = adc_read();
     adc_voltage += reading;
-    sleep_ms(1);
+    if (busy_wait)
+      busy_wait_ms(1);
+    else
+      sleep_ms(1);
   }
   adc_voltage *= ADC_CONVERSION_FACTOR / NUM_ADC_READS;
 
@@ -149,6 +152,7 @@ float get_battery_voltage(int which_battery)
 void register_tusb320_interrupt()
 {
   gpio_set_irq_enabled_with_callback(TUSB320INT, GPIO_IRQ_EDGE_FALL, true, &tusb320_interrupt_handler);
+  gpio_set_irq_enabled_with_callback(TUSB320ID, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &tusb320_interrupt_handler);
 }
 
 static void turn_off_power()
@@ -169,21 +173,22 @@ void tusb320_interrupt_handler(uint gpio, uint32_t events)
   {
     //TODO just clear the "we have data to read" i2c register for now
     printf("Saw TUSB320 interrupt! handling ...\n");
-    fflush(stdout);
     clear_interrupt_status(&updated_tusb320_state);
     update_state(&updated_tusb320_state, &current_tusb320_state);
     printf("TUSB320 interrupt handled!\n");
   }
+  if (gpio == TUSB320ID)
+  {
+    printf("Saw TUSB320 ID change! handling ...\n");
+    check_and_enable_power(true);
+    printf("ID change handled!\n");
+  }
 }
 
-void gather_voltages()
+bool check_and_enable_power(bool busy_wait)
 {
-  battery1_voltage = get_battery_voltage(1);
-  battery2_voltage = get_battery_voltage(2);
-}
-
-bool check_and_enable_power()
-{
+  battery1_voltage = get_battery_voltage(1, busy_wait);
+  battery2_voltage = get_battery_voltage(2, busy_wait);
   printf("battery 1 voltage is %.3f, battery 2 voltage is %.3f\n", battery1_voltage, battery2_voltage);
 
   if (gpio_get(TUSB320ID)) //then there is no USB cable connected
@@ -267,7 +272,10 @@ bool check_and_enable_power()
     battery_initial = false;
 
     connect_battery(battery_to_enable, true);
-    sleep_ms(100);
+    if (busy_wait) //you cannot sleep in an interrupt handler
+      busy_wait_ms(100);
+    else
+      sleep_ms(100);
     connect_battery(battery_to_disable, false);
 
     printf("Connected!\n");

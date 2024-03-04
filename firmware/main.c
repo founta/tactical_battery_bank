@@ -8,7 +8,7 @@ int main() {
 
   while (1)
   {
-    gather_voltages();
+    check_and_enable_power(false); //poll to see if battery has depleted and switch to the other
     sleep_ms(1000);
   }
 }

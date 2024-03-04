@@ -14,15 +14,13 @@ void init_gpio();
 void register_tusb320_interrupt();
 void tusb320_interrupt_handler(uint gpio, uint32_t events);
 
-bool check_and_enable_power();
+bool check_and_enable_power(bool busy_wait);
 
 void connect_battery(int which_battery, bool enable);
-float get_battery_voltage(int which_battery);
+float get_battery_voltage(int which_battery, bool busy_wait);
 void set_led(int which_led, bool enable);
 void enable_usbc_regulator(bool enable);
 
 void update_leds();
 void set_led_blink();
 bool led_blink_callback(struct repeating_timer *t);
-
-void gather_voltages();
