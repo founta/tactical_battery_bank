@@ -10,11 +10,23 @@
 #include <string.h>
 tusb320_state current_tusb320_state, updated_tusb320_state;
 
-struct repeating_timer battery_update_timer;
+struct repeating_timer led_blink_timer;
+int blink_led = -1;
+int blink_hold = 500; //ms
+int blink_on_duration = 2;
+int blink_on_count = 0;
+bool blink_on = false;
+
+int blink_off_duration = 1;
+int blink_off_count = 0;
+bool blinking = false;
 
 bool battery_initial = true;
 bool battery1_on = false;
 bool battery2_on = false;
+
+float battery1_voltage = 0;
+float battery2_voltage = 0;
 
 void control_init()
 {
@@ -137,14 +149,12 @@ float get_battery_voltage(int which_battery)
 void register_tusb320_interrupt()
 {
   gpio_set_irq_enabled_with_callback(TUSB320INT, GPIO_IRQ_EDGE_FALL, true, &tusb320_interrupt_handler);
-  //gpio_set_irq_enabled_with_callback(TUSB320ID, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &tusb320_interrupt_handler);
 }
 
 static void turn_off_power()
 {
   enable_usbc_regulator(false);
 
-  //cancel_repeating_timer(&battery_update_timer);
   connect_battery(1, false);
   connect_battery(2, false);
 
@@ -162,29 +172,12 @@ void tusb320_interrupt_handler(uint gpio, uint32_t events)
     update_state(&updated_tusb320_state, &current_tusb320_state);
     printf("TUSB320 interrupt handled!\n");
   }
-  // if (gpio == TUSB320ID)
-  // {
-  //   if (events & GPIO_IRQ_EDGE_RISE) // usb-c disconnected, turn off regulator and relays and such
-  //   {
-  //     printf("USB-C was disconnected! Disabling power...\n");
-  //     turn_off_power();
-  //   }
-  //   else if (events & GPIO_IRQ_EDGE_FALL) // usb-c connected
-  //   {
-  //     printf("USB-C connected!\n");
-  //     fflush(stdout);
-  //     check_and_enable_power();
-  //     printf("Starting to monitor battery voltages...\n");
-  //     fflush(stdout);
-  //     start_battery_monitoring();
-  //   }
-  // }
 }
 
 bool check_and_enable_power()
 {
-  float battery1_voltage = get_battery_voltage(1);
-  float battery2_voltage = get_battery_voltage(2);
+  battery1_voltage = get_battery_voltage(1);
+  battery2_voltage = get_battery_voltage(2);
 
   printf("battery 1 voltage is %.3f, battery 2 voltage is %.3f\n", battery1_voltage, battery2_voltage);
 
@@ -279,14 +272,70 @@ bool check_and_enable_power()
   return true;
 }
 
-void start_battery_monitoring()
+void update_leds()
 {
-  add_repeating_timer_ms(1000, battery_monitor_callback, NULL, &battery_update_timer);
+  if (!battery1_on && blinking && blink_led == 1)
+  {
+    cancel_repeating_timer(&led_blink_timer);
+    blinking = false;
+    blink_led = -1;
+  }
+  if (!battery2_on && blinking && blink_led == 2)
+  {
+    cancel_repeating_timer(&led_blink_timer);
+    blinking = false;
+    blink_led = -1;
+  }
+  if (battery1_on && !blinking)
+  {
+    set_led_blink(1);
+    blinking = true;
+  }
+  if (battery2_on && !blinking)
+  {
+    set_led_blink(2);
+    blinking = true;
+  }
+
+  if (blink_led != 1)
+  {
+    set_led(1, battery1_voltage > BATTERY_LOW);
+  }
+  if (blink_led != 2)
+  {
+    set_led(2, battery2_voltage > BATTERY_LOW);
+  }
 }
 
-bool battery_monitor_callback(struct repeating_timer *t)
+void set_led_blink(int which_led)
 {
-  check_and_enable_power();
+  blink_led = which_led;
+  add_repeating_timer_ms(-blink_hold, led_blink_callback, NULL, &led_blink_timer);
+}
+
+bool led_blink_callback(struct repeating_timer *t)
+{
+  if (blink_on)
+  {
+    blink_on_count += 1;
+    if (blink_on_count >= blink_on_duration)
+    {
+      blink_on = false;
+      blink_on_count = 0;
+    }
+  }
+  else
+  {
+    blink_off_count += 1;
+    if (blink_off_count >= blink_off_duration)
+    {
+      blink_on = true;
+      blink_off_count = 0;
+    }
+  }
+
+  set_led(blink_led, blink_on);
+
   return true;
 }
 

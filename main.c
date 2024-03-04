@@ -9,6 +9,7 @@ int main() {
   while (1)
   {
     check_and_enable_power();
+    update_leds();
     sleep_ms(1000);
   }
 }
