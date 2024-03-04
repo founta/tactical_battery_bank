@@ -12,6 +12,7 @@ tusb320_state current_tusb320_state, updated_tusb320_state;
 
 struct repeating_timer battery_update_timer;
 
+bool battery_initial = true;
 bool battery1_on = false;
 bool battery2_on = false;
 
@@ -39,13 +40,13 @@ void control_init()
   printf("battery control initialized!\n");
 }
 
-static void set_gpio_out(int pin, int pd)
+static void set_gpio_out(int pin, int pd, int pu)
 {
   gpio_init(pin);
   gpio_set_dir(pin, GPIO_OUT);
   if (pd)
     gpio_pull_down(pin);
-  else
+  else if (pu)
     gpio_pull_up(pin);
 }
 
@@ -64,7 +65,7 @@ void init_gpio()
   adc_init();
 
   //TUSB320 GPIO pins
-  set_gpio_out(TUSB320EN,     1);
+  set_gpio_out(TUSB320EN,     1,0);
   set_gpio_in (TUSB320INT,    0,1);
   set_gpio_in (TUSB320ID,     0,1);
 
@@ -76,25 +77,29 @@ void init_gpio()
   gpio_pull_up(TUSB320SCL);
 
   //Battery 1 GPIO
-  set_gpio_out(BAT1_EN,       1); //pull down
+  set_gpio_out(BAT1_EN,       1,0); //pull down
   set_gpio_in (BAT1_SENSE,    0,1); //pull up
   set_gpio_in (BAT1_DQ_READ,  0,1);
-  set_gpio_out(BAT1_DQ_WRITE, 1);
+  set_gpio_out(BAT1_DQ_WRITE, 1,0);
 
   //Battery 1 ADC
   adc_gpio_init(BAT1_ADC);
 
   //Battery 2 GPIO
-  set_gpio_out(BAT2_EN,       1);
+  set_gpio_out(BAT2_EN,       1,0);
   set_gpio_in (BAT2_SENSE,    0,1); //pull up
   set_gpio_in (BAT2_DQ_READ,  0,1);
-  set_gpio_out(BAT2_DQ_WRITE, 1);
+  set_gpio_out(BAT2_DQ_WRITE, 1,0);
 
   //Battery 2 ADC
   adc_gpio_init(BAT2_ADC);
 
   //USB C regulator enable GPIO
-  set_gpio_out(USBC_PWR_EN, 1); //pull down -- default disabled
+  set_gpio_out(USBC_PWR_EN, 1,0); //pull down -- default disabled
+
+  //LED gpio
+  set_gpio_out(LED1_EN, 0,0);
+  set_gpio_out(LED2_EN, 0,0);
 }
 
 float get_battery_voltage(int which_battery)
@@ -139,9 +144,11 @@ static void turn_off_power()
 {
   enable_usbc_regulator(false);
 
-  cancel_repeating_timer(&battery_update_timer);
+  //cancel_repeating_timer(&battery_update_timer);
   connect_battery(1, false);
   connect_battery(2, false);
+
+  printf("Power disabled!\n");
 }
 
 void tusb320_interrupt_handler(uint gpio, uint32_t events)
@@ -188,47 +195,87 @@ bool check_and_enable_power()
     return false;
   }
 
-  if (battery1_voltage < BATTERY_LOW && battery2_voltage < BATTERY_LOW)
+  if (battery1_voltage < BATTERY_LOWEST && battery2_voltage < BATTERY_LOWEST)
   {
     printf("Both battery voltages are too low! Turning off power...\n");
     turn_off_power();
     return false;
   }
-
-  if (fabs(battery1_voltage - battery2_voltage) < BATTERY_WIGGLE)
+  
+  int battery_to_enable = -1;
+  int battery_to_disable = -1;
+  if (!battery1_on && !battery2_on)
   {
-    if (battery1_on || battery2_on)
+    printf("Both batteries were off ... \n");
+    float thresh = battery_initial ? BATTERY_LOW : BATTERY_LOWEST;
+    if (battery1_voltage > battery2_voltage && battery1_voltage > thresh)
     {
-      printf("Battery voltages are very close! Doing nothing...\n");
-      return true;
+      printf("\tconnecting battery 1 ...\n");
+      battery_to_enable = 1;
+      battery_to_disable = 2;
     }
-  }
-
-  int battery_to_enable;
-  int battery_to_disable;
-  if (battery1_voltage > battery2_voltage)
-  {
-    printf("Connecting battery 1...\n");
-    battery_to_enable = 1;
-    battery_to_disable = 2;
+    else if (battery2_voltage > thresh)
+    {
+      printf("\tconnecting battery 2 ...\n");
+      battery_to_enable = 2;
+      battery_to_disable = 1;
+    }
+    else
+    {
+      printf("Leaving batteries off -- both are too low\n");
+      turn_off_power();
+      return false;
+    }
   }
   else
   {
-    printf("Connecting battery 2...\n");
-    battery_to_enable = 2;
-    battery_to_disable = 1;
+    //check if battery went under threshold and switch to the other
+    if (battery1_on && battery1_voltage < BATTERY_LOWEST)
+    {
+      printf("Battery 1 voltage became too low!\n");
+      if (battery2_voltage > BATTERY_LOW)
+      {
+        printf("\tswitching to battery 2...\n");
+        battery_to_disable = 1;
+        battery_to_enable = 2;
+      }
+      else //both batteries are too low now
+      {
+        printf("\tdisabling both batteries...\n");
+        turn_off_power();
+        return false;
+      }
+    }
+    else if (battery2_on && battery2_voltage < BATTERY_LOWEST)
+    {
+      printf("Battery 2 voltage became too low!\n");
+      if (battery1_voltage > BATTERY_LOW)
+      {
+        printf("\tswitching to battery 1...\n");
+        battery_to_disable = 2;
+        battery_to_enable = 1;
+      }
+      else //both batteries are too low now
+      {
+        printf("\tdisabling both batteries...\n");
+        turn_off_power();
+        return false;
+      }
+    }
   }
 
-  connect_battery(battery_to_enable, true);
-  sleep_ms(100);
-  connect_battery(battery_to_disable, false);
+  if (battery_to_disable != -1 && battery_to_enable != -1)
+  {
+    battery_initial = false;
 
-  battery1_on = (battery_to_enable == 1);
-  battery2_on = (battery_to_enable == 2);
+    connect_battery(battery_to_enable, true);
+    sleep_ms(100);
+    connect_battery(battery_to_disable, false);
 
-  printf("Connected!\n");
+    printf("Connected!\n");
 
-  enable_usbc_regulator(true);
+    enable_usbc_regulator(true);
+  }
   return true;
 }
 
@@ -245,7 +292,17 @@ bool battery_monitor_callback(struct repeating_timer *t)
 
 void connect_battery(int which_battery, bool enable)
 {
-  int relay_gpio = (which_battery == 1) ? BAT1_EN : BAT2_EN;
+  int relay_gpio;
+  if (which_battery == 1)
+  {
+    battery1_on = enable;
+    relay_gpio = BAT1_EN;
+  }
+  else //battery 2
+  {
+    battery2_on = enable;
+    relay_gpio = BAT2_EN;
+  }
   gpio_put(relay_gpio, enable);
 
   set_led(which_battery, enable);

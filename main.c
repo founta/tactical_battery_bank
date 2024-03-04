@@ -8,7 +8,6 @@ int main() {
 
   while (1)
   {
-    //TODO remove this
     check_and_enable_power();
     sleep_ms(1000);
   }

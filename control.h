@@ -1,8 +1,11 @@
 
 #include "pico/stdlib.h"
 
-#define BATTERY_LOW (9) //V
+#define BATTERY_LOWEST (9) //V
 #define BATTERY_WIGGLE (0.3) //V
+
+#define BATTERY_LOW (BATTERY_LOWEST + BATTERY_WIGGLE) //V
+
 
 void control_init();
 
