@@ -24,3 +24,5 @@ void enable_usbc_regulator(bool enable);
 void update_leds();
 void set_led_blink();
 bool led_blink_callback(struct repeating_timer *t);
+
+void gather_voltages();

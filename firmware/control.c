@@ -158,6 +158,8 @@ static void turn_off_power()
   connect_battery(1, false);
   connect_battery(2, false);
 
+  update_leds();
+
   printf("Power disabled!\n");
 }
 
@@ -174,11 +176,14 @@ void tusb320_interrupt_handler(uint gpio, uint32_t events)
   }
 }
 
-bool check_and_enable_power()
+void gather_voltages()
 {
   battery1_voltage = get_battery_voltage(1);
   battery2_voltage = get_battery_voltage(2);
+}
 
+bool check_and_enable_power()
+{
   printf("battery 1 voltage is %.3f, battery 2 voltage is %.3f\n", battery1_voltage, battery2_voltage);
 
   if (gpio_get(TUSB320ID)) //then there is no USB cable connected
@@ -269,6 +274,7 @@ bool check_and_enable_power()
 
     enable_usbc_regulator(true);
   }
+  update_leds();
   return true;
 }
 

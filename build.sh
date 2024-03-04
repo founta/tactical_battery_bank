@@ -1,7 +1,7 @@
 #!/bin/bash
 
 mkdir -p build && cd build
-cmake ../ && make -j 8
+cmake ../firmware && make -j 8
 
 cd ..
 

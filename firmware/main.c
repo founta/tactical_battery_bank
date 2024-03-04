@@ -8,8 +8,7 @@ int main() {
 
   while (1)
   {
-    check_and_enable_power();
-    update_leds();
+    gather_voltages();
     sleep_ms(1000);
   }
 }
